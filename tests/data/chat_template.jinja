@@ -1,0 +1,25 @@
+{%- set system_prompt = 'You are a helpful assistant.\nPlease reason step by step, and put your final answer within \\boxed{}.' %}
+{%- if tools %}
+    {{- raise_exception('Limite Violetto supports text-only chat; tools are not supported.') }}
+{%- endif %}
+{{- '<|endoftext|><|im_start|>system\n' + system_prompt + '<|im_end|>\n' }}
+{%- for message in messages %}
+    {%- if (message.tool_calls is defined and message.tool_calls is not none) or (message.function_call is defined and message.function_call is not none) %}
+        {{- raise_exception('Limite Violetto supports text-only chat; tool calls are not supported.') }}
+    {%- endif %}
+    {%- if message.content is not string %}
+        {{- raise_exception('Limite Violetto supports text-only chat; message content must be a string.') }}
+    {%- endif %}
+    {%- if message.role == 'system' %}
+        {%- if message.content != system_prompt %}
+            {{- raise_exception('Limite Violetto requires its fixed mathematical system prompt; custom system messages are not supported.') }}
+        {%- endif %}
+    {%- elif message.role == 'user' or message.role == 'assistant' %}
+        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}
+    {%- else %}
+        {{- raise_exception('Limite Violetto supports only user, assistant, and the exact canonical system message; other roles are not supported.') }}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+{%- endif %}

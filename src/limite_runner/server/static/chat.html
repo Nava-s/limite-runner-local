@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Limite Violetto — chat locale</title>
+<style>
+  :root {
+    --bg: #f6f4fb; --panel: #ffffff; --ink: #241b3a; --muted: #6b6183;
+    --accent: #5b34c4; --ok: #1c7c46; --warn: #a8630a; --err: #b3261e;
+    --stop: #6b6183; --line: #e3ddf2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, "Segoe UI", sans-serif;
+  }
+  header {
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    padding: 14px 22px; display: flex; flex-wrap: wrap; gap: 14px;
+    align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .badge {
+    font-size: 12.5px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+    white-space: nowrap;
+  }
+  .badge.ok { color: var(--ok); border-color: var(--ok); }
+  .badge.err { color: var(--err); border-color: var(--err); }
+  main {
+    max-width: 880px; margin: 0 auto; padding: 18px 22px 24px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .note {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 14px; font-size: 13px; color: var(--muted);
+  }
+  #log { display: flex; flex-direction: column; gap: 12px; }
+  .msg { border-radius: 12px; padding: 11px 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user { background: #ece6fb; border: 1px solid var(--line); align-self: flex-end; max-width: 85%; }
+  .msg.bot { background: var(--panel); border: 1px solid var(--line); align-self: flex-start; max-width: 95%; }
+  .msg .role { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 4px; }
+  .status {
+    font-size: 13px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line);
+    color: var(--muted);
+  }
+  .status.ok { color: var(--ok); }
+  .status.warn { color: var(--warn); }
+  .status.stop { color: var(--stop); }
+  .status.err { color: var(--err); }
+  form {
+    display: flex; gap: 10px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+    position: sticky; bottom: 12px;
+  }
+  textarea {
+    flex: 1; resize: vertical; min-height: 52px; max-height: 220px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+    font: inherit; color: var(--ink); background: var(--bg);
+  }
+  .btn {
+    border: 0; border-radius: 8px; padding: 0 18px; font: inherit;
+    cursor: pointer; color: #fff; background: var(--accent); align-self: stretch;
+  }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.stopbtn { background: var(--stop); }
+  .cfg {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 14px; font-size: 13px; color: var(--muted);
+  }
+  .cfg input {
+    width: 90px; border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 8px; font: inherit; color: var(--ink); background: var(--bg);
+  }
+  .cfg label { display: flex; gap: 6px; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Limite 1B Violetto — chat locale</h1>
+    <div class="sub">Runtime limite-runner · interfaccia soggetta al preprocessing single-turn</div>
+  </div>
+  <div class="badge" id="health">stato server: …</div>
+</header>
+<main>
+  <div class="note">
+    Ogni domanda viene inviata al modello <b>da sola</b>: la cronologia resta visibile
+    qui ma non viene reinviata (Limite è single-turn). Tools, MCP e system prompt
+    personalizzati sono disabilitati: il modello non li supporta.
+  </div>
+  <div class="cfg">
+    <label>Limite risposta (token)
+      <input type="number" id="max_tokens" min="1" step="1" value="__DEFAULT_MAX_TOKENS__">
+    </label>
+    <span>predefinito del server: __DEFAULT_MAX_TOKENS__ · configurabile anche con --max-tokens / LIMITE_MAX_TOKENS</span>
+  </div>
+  <div id="log"></div>
+  <form id="form">
+    <textarea id="input" placeholder="Scrivi un problema o una domanda…" required></textarea>
+    <button class="btn" id="send" type="submit">Invia</button>
+    <button class="btn stopbtn" id="stop" type="button" disabled>Ferma</button>
+  </form>
+</main>
+<script>
+"use strict";
+const log = document.getElementById("log");
+const form = document.getElementById("form");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const stopBtn = document.getElementById("stop");
+const maxTok = document.getElementById("max_tokens");
+const healthBadge = document.getElementById("health");
+let controller = null;
+
+// --- stato risposta: mai presentare una risposta troncata come completa ---
+function statusText(finish, aborted, error) {
+  if (error) return { cls: "err", text: "✗ Errore: " + error };
+  if (aborted) return { cls: "stop", text: "■ Interrotta: risposta parziale, non completa." };
+  if (finish === "length") return { cls: "warn", text: "⚠ Limite di token raggiunto: la risposta è troncata e potrebbe essere incompleta." };
+  if (finish === "unverified") return { cls: "warn", text: "⚠ Nessuno stato di completamento osservato: la risposta NON è verificata come completa." };
+  if (finish === "stop") return { cls: "ok", text: "✓ Risposta conclusa." };
+  return { cls: "warn", text: "⚠ Fine senza indicazione di completamento: considera la risposta non verificata." };
+}
+
+function addMsg(role, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + (role === "user" ? "user" : "bot");
+  const r = document.createElement("div");
+  r.className = "role";
+  r.textContent = role === "user" ? "tu" : "limite";
+  const body = document.createElement("div");
+  body.textContent = text;
+  const st = document.createElement("div");
+  st.className = "status";
+  st.style.display = "none";
+  div.appendChild(r); div.appendChild(body); div.appendChild(st);
+  log.appendChild(div);
+  input.focus();
+  return { body, st };
+}
+
+async function refreshHealth() {
+  try {
+    const r = await fetch("/health");
+    const j = await r.json();
+    if (r.ok && j.status === "ok") {
+      healthBadge.textContent = "stato server: pronto (" + (j.backend || "?") + ")";
+      healthBadge.className = "badge ok";
+    } else {
+      healthBadge.textContent = "stato server: " + (j.status || r.status) + (j.error ? " — " + j.error : "");
+      healthBadge.className = "badge err";
+    }
+  } catch (e) {
+    healthBadge.textContent = "stato server: non raggiungibile";
+    healthBadge.className = "badge err";
+  }
+}
+refreshHealth();
+setInterval(refreshHealth, 5000);
+
+form.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const question = input.value.trim();
+  if (!question || controller) return;
+  const n = parseInt(maxTok.value, 10);
+  const limit = Number.isFinite(n) && n >= 1 ? n : 2048;
+
+  addMsg("user", question);
+  const { body, st } = addMsg("bot", "");
+  input.value = "";
+  sendBtn.disabled = true;
+  stopBtn.disabled = false;
+  controller = new AbortController();
+  let aborted = false, error = null, finish = null, text = "";
+
+  try {
+    // Solo l'ultima domanda: nessuna cronologia, nessun system, nessun tool.
+    const res = await fetch("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: "limite-1b-violetto",
+        messages: [{ role: "user", content: question }],
+        stream: true,
+        max_completion_tokens: limit
+      })
+    });
+    if (!res.ok) {
+      let detail = "HTTP " + res.status;
+      try { detail = (await res.json()).detail || detail; } catch (e) {}
+      throw new Error(detail);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        let evt;
+        try { evt = JSON.parse(payload); } catch (e) { continue; }
+        if (evt.error) { error = String(evt.error); continue; }
+        const ch = (evt.choices && evt.choices[0]) || {};
+        if (ch.delta && ch.delta.content) {
+          text += ch.delta.content;
+          body.textContent = text;
+        }
+        if (ch.finish_reason) finish = ch.finish_reason;
+      }
+    }
+  } catch (e) {
+    if (e.name === "AbortError") aborted = true;
+    else error = e.message || String(e);
+  } finally {
+    controller = null;
+    sendBtn.disabled = false;
+    stopBtn.disabled = true;
+    const s = statusText(finish, aborted, error);
+    st.textContent = s.text;
+    st.className = "status " + s.cls;
+    st.style.display = "block";
+  }
+});
+
+stopBtn.addEventListener("click", () => {
+  if (controller) controller.abort();
+});
+</script>
+</body>
+</html>

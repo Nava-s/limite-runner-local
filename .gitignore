@@ -1,0 +1,49 @@
+# Python environments and generated caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Package and native build output
+*.egg-info/
+build/
+dist/
+/tools/llama.cpp/
+
+# Downloaded weights and local artifact stores (tests/data stays versioned)
+*.gguf
+*.safetensors
+*.litertlm
+/data/
+/models/
+limite.lock.json
+
+# Local run output
+*.log
+/logs/
+/validation-report.json
+
+# Per-user configuration; keep documented examples publishable
+.env
+.env.*
+!.env.example
+!.env.*.example
+limite-launcher.env
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Keep uv.lock, limite-launcher.env.example, and reviewed experiments tracked.
+
+# Web UI dependencies and intermediate output
+node_modules/
+.svelte-kit/
+webui/dist/
+webui/storybook-static/
